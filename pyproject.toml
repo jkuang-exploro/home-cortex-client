@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "home-cortex-client"
+version = "0.1.0"
+description = "Edge-device camera and streaming runtime for Home Cortex"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+camera = [
+    "opencv-python>=4.8,<5",
+]
+dev = [
+    "pytest>=8,<9",
+]
+
+[project.scripts]
+home-cortex-client = "home_cortex_client.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/home_cortex_client"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "manual: opt-in physical camera checks (HOME_CORTEX_CLIENT_CAMERA_SMOKE=1)",
+]
+
