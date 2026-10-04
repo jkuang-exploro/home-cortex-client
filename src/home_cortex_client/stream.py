@@ -5,6 +5,7 @@ import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 
 BOUNDARY = "edgeframe"
@@ -44,6 +45,9 @@ class MJPEGStreamServer:
                 return
 
             def do_GET(self) -> None:  # noqa: N802
+                if urlsplit(self.path).path.startswith("/debug/"):
+                    self._debug("GET")
+                    return
                 if self.path in {"/", "/index.html"}:
                     body = _viewer_html(config.path).encode()
                     self.send_response(200)
@@ -88,6 +92,26 @@ class MJPEGStreamServer:
                         runtime.wait(runtime.frame_interval)
                 except BrokenPipeError:
                     return
+
+            def do_POST(self) -> None:  # noqa: N802
+                if urlsplit(self.path).path.startswith("/debug/"):
+                    self._debug("POST")
+                    return
+                self.send_error(404)
+
+            def _debug(self, method: str) -> None:
+                from .debug import dispatch
+
+                split = urlsplit(self.path)
+                query = {key: values[-1] for key, values in parse_qs(split.query).items()}
+                status, content_type, headers, body = dispatch(runtime, method, split.path, query)
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                for key, value in headers.items():
+                    self.send_header(key, value)
+                self.end_headers()
+                self.wfile.write(body)
 
         httpd = ThreadingHTTPServer((config.host, config.port), Handler)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)

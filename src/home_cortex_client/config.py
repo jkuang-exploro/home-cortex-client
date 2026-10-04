@@ -22,6 +22,10 @@ class ClientConfig:
     width: int | None = None
     height: int | None = None
     fps: float = 10.0
+    buffer_seconds: float = 60.0
+    freshness_seconds: float = 2.0
+    evidence_dir: str | None = None
+    evidence_max_items: int = 8
 
     @classmethod
     def from_env(cls) -> "ClientConfig":
@@ -38,6 +42,10 @@ class ClientConfig:
             width=_optional_integer("WIDTH"),
             height=_optional_integer("HEIGHT"),
             fps=_number("FPS", cls.fps),
+            buffer_seconds=_number("BUFFER_SECONDS", cls.buffer_seconds),
+            freshness_seconds=_number("FRESHNESS_SECONDS", cls.freshness_seconds),
+            evidence_dir=_value("EVIDENCE_DIR"),
+            evidence_max_items=_integer("EVIDENCE_MAX_ITEMS", cls.evidence_max_items),
         )
 
 

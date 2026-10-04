@@ -1,6 +1,7 @@
 """Session-only Home Cortex transport for an already configured embodiment."""
 from __future__ import annotations
 
+import base64
 import json
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -22,9 +23,10 @@ class BackendSession:
         self.embodiment_id = embodiment_id
         self.session_id: str | None = None
 
-    def connect(self) -> None:
+    def connect(self, available_capabilities: list[str] | None = None) -> None:
+        names = ["vision.observe"] if available_capabilities is None else list(available_capabilities)
         response = self._request(
-            "POST", "", {"available_capabilities": ["vision.observe"]},
+            "POST", "", {"available_capabilities": names},
         )
         session = response.get("session")
         session_id = session.get("session_id") if isinstance(session, dict) else None
@@ -37,6 +39,42 @@ class BackendSession:
             raise RuntimeError("Home Cortex session is not open")
         self._request("POST", "/heartbeat")
 
+    def update_capabilities(self, available_capabilities: list[str]) -> None:
+        if self.session_id is None:
+            raise RuntimeError("Home Cortex session is not open")
+        self._request(
+            "POST", "/capabilities",
+            {"available_capabilities": list(available_capabilities)},
+        )
+
+    def poll_commands(self) -> list[dict]:
+        if self.session_id is None:
+            raise RuntimeError("Home Cortex session is not open")
+        result = self._request("GET", "/commands")
+        commands = result.get("commands")
+        if not isinstance(commands, list):
+            raise RuntimeError("Home Cortex returned an invalid command list")
+        return [command for command in commands if isinstance(command, dict)]
+
+    def submit_observation(self, command_id: str, manifest: dict, media: bytes) -> dict:
+        return self._request(
+            "POST",
+            "/observations",
+            {
+                "command_id": command_id,
+                "manifest": manifest,
+                "media_base64": base64.b64encode(media).decode("ascii"),
+            },
+            timeout=60,
+        )
+
+    def submit_observation_failure(self, command_id: str, code: str, message: str) -> dict:
+        return self._request(
+            "POST",
+            "/observations",
+            {"command_id": command_id, "error": {"code": code, "message": message}},
+        )
+
     def disconnect(self) -> None:
         if self.session_id is None:
             return
@@ -45,7 +83,9 @@ class BackendSession:
         finally:
             self.session_id = None
 
-    def _request(self, method: str, suffix: str, payload: dict | None = None) -> dict:
+    def _request(
+        self, method: str, suffix: str, payload: dict | None = None, *, timeout: float = 5,
+    ) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"}
         if self.session_id is not None:
             headers["X-Embodiment-Session-ID"] = self.session_id
@@ -54,7 +94,7 @@ class BackendSession:
             body = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = Request(self.url + suffix, data=body, headers=headers, method=method)
-        with urlopen(request, timeout=5) as response:
+        with urlopen(request, timeout=timeout) as response:
             result = json.load(response)
         if not isinstance(result, dict):
             raise RuntimeError("Home Cortex returned an invalid session response")

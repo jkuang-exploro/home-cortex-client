@@ -4,6 +4,7 @@ from __future__ import annotations
 import platform
 from datetime import datetime, timedelta, timezone
 
+from .capture import CaptureError, classify_camera_failure
 from .frames import CameraFrame, capture_timestamp
 
 
@@ -33,6 +34,7 @@ class SyntheticCameraSource:
         fps: float = 10.0,
         jpeg: bytes = TINY_JPEG,
         start: datetime | None = None,
+        clock=None,
     ) -> None:
         self.device_id = device_id
         self.camera_id = camera_id
@@ -40,6 +42,7 @@ class SyntheticCameraSource:
         self.height = height
         self.fps = fps
         self._jpeg = jpeg
+        self._clock = clock
         self._start = start or datetime(2026, 9, 13, 12, 0, tzinfo=timezone.utc)
         self._index = 0
         self._opened = False
@@ -51,7 +54,9 @@ class SyntheticCameraSource:
     def read(self) -> CameraFrame:
         if not self._opened:
             raise RuntimeError("SyntheticCameraSource is closed")
-        when = self._start + timedelta(seconds=self._index / self.fps)
+        when = self._clock() if self._clock is not None else (
+            self._start + timedelta(seconds=self._index / self.fps)
+        )
         self._index += 1
         return CameraFrame(
             captured_at=capture_timestamp(when),
@@ -89,12 +94,18 @@ class MacCameraSource:
         self._capture = None
 
     def open(self) -> None:
-        cv2 = _load_cv2()
+        try:
+            cv2 = _load_cv2()
+        except RuntimeError as error:
+            raise CaptureError("camera_unavailable") from error
         backend = cv2.CAP_AVFOUNDATION if platform.system() == "Darwin" else cv2.CAP_ANY
-        capture = cv2.VideoCapture(self.index, backend)
+        try:
+            capture = cv2.VideoCapture(self.index, backend)
+        except Exception as error:
+            raise classify_camera_failure(error) from error
         if not capture.isOpened():
             capture.release()
-            raise RuntimeError(f"Could not open camera index {self.index}")
+            raise CaptureError("camera_unavailable")
         if self.width:
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         if self.height:
@@ -106,17 +117,26 @@ class MacCameraSource:
 
     def read(self) -> CameraFrame:
         if self._capture is None or self._cv2 is None:
-            raise RuntimeError("MacCameraSource is closed")
-        ok, image = self._capture.read()
+            raise CaptureError("camera_unavailable")
+        try:
+            ok, image = self._capture.read()
+        except Exception as error:
+            raise classify_camera_failure(error) from error
         if not ok or image is None:
-            raise RuntimeError("Camera frame grab failed")
+            raise CaptureError("capture_interrupted")
         captured_at = capture_timestamp()
-        height, width = image.shape[:2]
-        ok, encoded = self._cv2.imencode(
-            ".jpg", image, [int(self._cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
-        )
+        try:
+            height, width = image.shape[:2]
+        except Exception as error:
+            raise CaptureError("capture_interrupted") from error
+        try:
+            ok, encoded = self._cv2.imencode(
+                ".jpg", image, [int(self._cv2.IMWRITE_JPEG_QUALITY), self.jpeg_quality]
+            )
+        except Exception as error:
+            raise CaptureError("encoding_failed") from error
         if not ok:
-            raise RuntimeError("JPEG encode failed")
+            raise CaptureError("encoding_failed")
         return CameraFrame(
             captured_at=captured_at,
             width=int(width),
@@ -136,9 +156,6 @@ def _load_cv2():
     try:
         import cv2
     except ImportError as error:
-        raise RuntimeError(
-            "Mac camera capture requires opencv-python. "
-            "Install with: pip install 'home-cortex-client[camera]'"
-        ) from error
+        raise RuntimeError("opencv-python is not installed") from error
     return cv2
 

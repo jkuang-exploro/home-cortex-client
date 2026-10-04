@@ -30,6 +30,35 @@ disconnect on clean shutdown. An abrupt process or network loss has no
 server-side session expiry yet, so Home Cortex may report the old session
 online until a server restart or a later successful disconnect.
 
+Capture stays local. The client keeps a rolling buffer of short JPEG segments,
+60 seconds by default (`HOME_CORTEX_CLIENT_BUFFER_SECONDS`). Nothing in that
+buffer is uploaded until Home Cortex asks. A permission denial, a busy camera,
+or an encoding failure leaves the process running and the session connected.
+`vision.observe` is advertised only while a fresh frame is available.
+
+Local checks do not call a model:
+
+```sh
+home-cortex-client camera status
+home-cortex-client camera latest-frame
+home-cortex-client camera list-buffer
+home-cortex-client camera save-last 5
+home-cortex-client evidence latest
+home-cortex-client evidence clip --seconds 8
+home-cortex-client evidence inspect evidence:...
+```
+
+Those commands talk to the debug routes on the local preview server. Selected
+evidence is written under `HOME_CORTEX_CLIENT_EVIDENCE_DIR`, or a temporary
+directory when that variable is unset, and removed by count and age
+(`HOME_CORTEX_CLIENT_EVIDENCE_MAX_ITEMS`, default 8).
+`HOME_CORTEX_CLIENT_FRESHNESS_SECONDS` is the oldest still that
+`vision.observe` may call current.
+
+With a session open, the client polls for `vision.observe` and
+`vision.observe_clip` about twice a second and submits one selected still or
+clip. It does not upload continuously.
+
 The preview is served at `http://127.0.0.1:8088/live.mjpg`, the small viewer at
 `/`, and runtime health at `/health`. Use `--help` for all configuration flags.
 Each flag defaults from the corresponding `HOME_CORTEX_CLIENT_*` variable shown
@@ -45,14 +74,11 @@ home_cortex_client  -- encoded live stream ---------------->  browser/gateway
 home_cortex         -- backend API ------------------------->  home_gui
 ```
 
-The implemented channels today are the encoded MJPEG stream and the optional
-Home Cortex embodiment session protocol. The future
-structured channel is deliberately a serialized protocol boundary: the client
-will send canonical `VisualObservation` JSON/NDJSON and evidence-clip metadata
-to a backend transport adapter. There is no production observation HTTP endpoint
-yet, so this project does not pretend to publish observations. Backend contract
-definitions remain authoritative and no Python package crosses the repository
-boundary.
+The implemented channels are the encoded MJPEG preview, the embodiment session
+(heartbeat plus an explicit still or clip when Home Cortex asks), and the local
+debug routes. Detector `VisualObservation` publishing is not implemented.
+Backend contract definitions remain authoritative and no Python package crosses
+the repository boundary.
 
 Replacing `MacCameraSource` with a future MicroDuck source should change device
 configuration and the capture adapter only. Backend evidence, spatial, identity,
@@ -64,11 +90,26 @@ and reconciliation semantics must not change.
 python -m pytest -q
 ```
 
-Tests use the synthetic source and mocks. The physical camera smoke test is
-manual and opt-in:
+Tests use the synthetic source and mocks. They cover the bounded buffer,
+evidence manifests, and capture-failure recovery. The physical camera smoke
+test is manual and opt-in:
 
 ```sh
 HOME_CORTEX_CLIENT_CAMERA_SMOKE=1 python -m pytest -q -m manual
 ```
 
-Vision implementation remains paused pending MicroDuck hardware.
+Detector, tracking, and automatic clip selection remain unimplemented.
+
+cd /Users/jiankuang/Workspace/home-cortex-client
+
+export HOME_CORTEX_CLIENT_CORTEX_URL="http://home-cortex-0"
+export HOME_CORTEX_CLIENT_CORTEX_API_KEY="$(
+  ssh -o BatchMode=yes jkuang@home-cortex-0 \
+    'docker exec cortex-cortex-api-1 printenv CORTEX_API_KEY'
+)"
+
+.venv/bin/home-cortex-client \
+  --source mac \
+  --embodiment-id embodiment:macbook-0 \
+  --host 127.0.0.1 \
+  --port 8088
