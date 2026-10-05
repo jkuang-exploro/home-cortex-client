@@ -1,0 +1,20 @@
+{
+  "manifest": {
+    "embodiment_id": "embodiment:example-01",
+    "camera_id": "camera:example",
+    "media_type": "image",
+    "captured_start": "2026-10-05T04:00:01.000Z",
+    "captured_end": "2026-10-05T04:00:01.000Z",
+    "duration_ms": 0,
+    "sequence_start": 1,
+    "sequence_end": 1,
+    "width": 1,
+    "height": 1,
+    "content_type": "image/jpeg",
+    "sha256": "32461d5bd1773012acef0ba15636752949bd7c2ce50f9172159d9f56cf0dd9af",
+    "reason": "manual_observe",
+    "evidence_id": "evidence:27eba37d0e00e41bfe853e75c27abfe6"
+  },
+  "media_base64": "/9j/2Q==",
+  "canonical_manifest_utf8": "{\"camera_id\":\"camera:example\",\"captured_end\":\"2026-10-05T04:00:01.000Z\",\"captured_start\":\"2026-10-05T04:00:01.000Z\",\"content_type\":\"image/jpeg\",\"duration_ms\":0,\"embodiment_id\":\"embodiment:example-01\",\"height\":1,\"media_type\":\"image\",\"reason\":\"manual_observe\",\"sequence_end\":1,\"sequence_start\":1,\"sha256\":\"32461d5bd1773012acef0ba15636752949bd7c2ce50f9172159d9f56cf0dd9af\",\"width\":1}"
+}

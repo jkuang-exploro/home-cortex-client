@@ -1,10 +1,9 @@
 """Device-local configuration for the edge runtime."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
 import os
-
+from dataclasses import dataclass, field
 
 ENV_PREFIX = "HOME_CORTEX_CLIENT_"
 
@@ -74,7 +73,7 @@ class ChangeDetectionConfig:
         if self.grid_width < 1 or self.grid_height < 1:
             raise ValueError("detector grid dimensions must be positive integers")
         if not isinstance(self.scene_change_candidates, bool):
-            raise ValueError("scene_change_candidates must be true or false")
+            raise ValueError("scene_change_candidates must be true or false")  # noqa: TRY004 — preserve configuration error contract
 
     @property
     def sample_interval_s(self) -> float:
@@ -87,6 +86,9 @@ class ClientConfig:
     embodiment_id: str = "embodiment:macbook-0"
     cortex_url: str | None = None
     cortex_api_key: str | None = None
+    client_interface: str = "v1"
+    credentials_dir: str | None = None
+    state_dir: str | None = None
     device_id: str = "device:dev_macbook"
     camera_id: str = "camera:built_in"
     camera_index: int = 0
@@ -110,6 +112,8 @@ class ClientConfig:
     promotion_max_age_s: float = 6 * 3600.0
 
     def __post_init__(self) -> None:
+        if self.client_interface not in {"v1", "legacy"}:
+            raise ValueError("client_interface must be v1 or explicit legacy rollback")
         if self.analyzer not in {"off", "vision", "hog"}:
             raise ValueError("analyzer must be off, vision, or hog")
         _duration("promotion_window_s", self.promotion_window_s, allow_zero=True)
@@ -129,7 +133,7 @@ class ClientConfig:
         _duration("promotion_max_age_s", self.promotion_max_age_s)
 
     @classmethod
-    def from_env(cls) -> "ClientConfig":
+    def from_env(cls) -> ClientConfig:
         detection = ChangeDetectionConfig(
             sample_hz=_number("DETECTOR_HZ", ChangeDetectionConfig.sample_hz),
             motion_start_threshold=_number(
@@ -172,6 +176,9 @@ class ClientConfig:
             embodiment_id=_text("EMBODIMENT_ID", cls.embodiment_id),
             cortex_url=_value("CORTEX_URL"),
             cortex_api_key=_value("CORTEX_API_KEY"),
+            client_interface=_text("INTERFACE", cls.client_interface),
+            credentials_dir=_value("CREDENTIALS_DIR"),
+            state_dir=_value("STATE_DIR"),
             device_id=_text("DEVICE_ID", cls.device_id),
             camera_id=_text("CAMERA_ID", cls.camera_id),
             camera_index=_integer("CAMERA_INDEX", cls.camera_index),

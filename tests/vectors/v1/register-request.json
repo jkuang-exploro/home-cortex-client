@@ -1,0 +1,29 @@
+{
+  "protocol_version": "1.0",
+  "schema_name": "hc.request",
+  "schema_version": 1,
+  "message_id": "00000000-0000-4000-8000-000000000001",
+  "sent_at": "2026-10-05T04:00:00.000Z",
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "target": {"embodiment_id": "embodiment:example-01", "session_id": null},
+  "operation": "session.register",
+  "arguments": {
+    "identity": {
+      "client_id": "client:example-01",
+      "embodiment_id": "embodiment:example-01",
+      "application_id": "example.capture",
+      "implementation": {
+        "name": "independent-example-client",
+        "software_version": "1.0.0",
+        "runtime_version": "1.0.0"
+      }
+    },
+    "manifest": {
+      "revision": 1,
+      "capabilities": [
+        {"name": "vision.observe", "schema_version": 1, "availability": "AVAILABLE"}
+      ]
+    }
+  },
+  "deadline_at": "2026-10-05T04:00:10.000Z"
+}

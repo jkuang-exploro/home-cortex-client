@@ -1,0 +1,19 @@
+{
+  "manifest_without_evidence_id": {
+    "embodiment_id": "embodiment:example-01",
+    "camera_id": "camera:摄像头",
+    "media_type": "image",
+    "captured_start": "2026-10-05T04:00:01.000Z",
+    "captured_end": "2026-10-05T04:00:01.000Z",
+    "duration_ms": 0,
+    "sequence_start": 1,
+    "sequence_end": 1,
+    "width": 1,
+    "height": 1,
+    "content_type": "image/jpeg",
+    "sha256": "32461d5bd1773012acef0ba15636752949bd7c2ce50f9172159d9f56cf0dd9af",
+    "reason": "manual_observe"
+  },
+  "canonical_manifest_utf8": "{\"camera_id\":\"camera:摄像头\",\"captured_end\":\"2026-10-05T04:00:01.000Z\",\"captured_start\":\"2026-10-05T04:00:01.000Z\",\"content_type\":\"image/jpeg\",\"duration_ms\":0,\"embodiment_id\":\"embodiment:example-01\",\"height\":1,\"media_type\":\"image\",\"reason\":\"manual_observe\",\"sequence_end\":1,\"sequence_start\":1,\"sha256\":\"32461d5bd1773012acef0ba15636752949bd7c2ce50f9172159d9f56cf0dd9af\",\"width\":1}",
+  "evidence_id": "evidence:d14f109031ff2305a9c0c7f438296445"
+}

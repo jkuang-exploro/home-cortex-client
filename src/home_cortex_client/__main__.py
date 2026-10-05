@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from pathlib import Path
 
 from .backend import BackendSession
 from .commands import fulfill_pending
@@ -35,6 +36,9 @@ def build_parser(config: ClientConfig | None = None) -> argparse.ArgumentParser:
     parser.add_argument("--camera-id", default=defaults.camera_id)
     parser.add_argument("--embodiment-id", default=defaults.embodiment_id)
     parser.add_argument("--cortex-url", default=defaults.cortex_url)
+    parser.add_argument("--client-interface", choices=("v1", "legacy"), default=defaults.client_interface)
+    parser.add_argument("--credentials-dir", default=defaults.credentials_dir)
+    parser.add_argument("--state-dir", default=defaults.state_dir)
     parser.add_argument("--index", type=int, default=defaults.camera_index)
     parser.add_argument("--buffer-seconds", type=float, default=defaults.buffer_seconds)
     parser.add_argument("--freshness-seconds", type=float, default=defaults.freshness_seconds)
@@ -44,6 +48,8 @@ def build_parser(config: ClientConfig | None = None) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "enroll":
+        return _enroll(args[1:])
     if args and args[0] in {
         "camera", "evidence", "detector", "candidates", "events", "semantics", "capabilities",
     }:
@@ -55,10 +61,22 @@ def main(argv: list[str] | None = None) -> int:
 def run(argv: list[str]) -> int:
     settings = ClientConfig.from_env()
     args = build_parser(settings).parse_args(argv)
-    if bool(args.cortex_url) != bool(settings.cortex_api_key):
-        raise SystemExit("Set both Home Cortex URL and HOME_CORTEX_CLIENT_CORTEX_API_KEY")
-    session = (BackendSession(args.cortex_url, settings.cortex_api_key, args.embodiment_id)
-               if args.cortex_url else None)
+    from .credentials import DEFAULT_STATE_DIR, Credentials
+    from .v1 import V1Session, capability_manifest
+
+    session = None
+    if args.client_interface == "legacy":
+        if bool(args.cortex_url) != bool(settings.cortex_api_key):
+            raise SystemExit("Legacy mode requires both Home Cortex URL and API key")
+        if args.cortex_url:
+            assert settings.cortex_api_key is not None
+            session = BackendSession(args.cortex_url, settings.cortex_api_key, args.embodiment_id)
+    elif args.credentials_dir or args.cortex_url or settings.cortex_api_key or (DEFAULT_STATE_DIR / "credentials" / "identity.json").exists():
+        # A legacy key/URL in V1 mode is not sufficient and cannot cause fallback.
+        root = Path(args.credentials_dir) if args.credentials_dir else DEFAULT_STATE_DIR / "credentials"
+        credentials = Credentials.load(root, args.embodiment_id)
+        session = V1Session(credentials, Path(args.state_dir) if args.state_dir else root / "protocol",
+                            endpoint=args.cortex_url)
     config = StreamConfig(host=args.host, port=args.port)
     wall_clock = lambda: datetime.now().astimezone()
     if args.source == "synthetic":
@@ -101,8 +119,11 @@ def run(argv: list[str]) -> int:
     try:
         if session is not None:
             _wait_for_first_sample(runtime)
-            advertised = _advertised(runtime)
-            session.connect(advertised)
+            if isinstance(session, V1Session):
+                session.start_maintenance(lambda: capability_manifest(runtime, settings.session_capabilities))
+            else:
+                advertised = _advertised(runtime)
+                session.connect(advertised)
     except Exception:
         runtime.stop()
         raise
@@ -118,27 +139,55 @@ def run(argv: list[str]) -> int:
     print("  candidates=local_only")
     print(f"  analyzer={settings.analyzer}")
     print(f"  promotion={'queued' if publisher is not None else 'off'}")
-    print(f"  Home Cortex session={'online' if session else 'disabled'}")
+    status = session.state.lower() if isinstance(session, V1Session) else 'online' if session else 'disabled'
+    print(f"  Home Cortex session={status}")
     print("  stop=Ctrl-C")
     try:
         next_heartbeat = time.monotonic() + 10
         next_poll = time.monotonic()
+        reported_v1_error = None
         while runtime.running:
             runtime.wait(0.2)
             if session is None:
+                continue
+            if isinstance(session, V1Session):
+                if session.last_error != reported_v1_error:
+                    reported_v1_error = session.last_error
+                    if reported_v1_error:
+                        print(f"Home Cortex V1: {reported_v1_error}", file=sys.stderr)
+                if not session.active:
+                    continue
+                observation.set()
+                try:
+                    try:
+                        session.fulfill_pending(runtime.packager)
+                        if publisher is not None and analyzer is not None and "vision.autonomous_promotion" in session.effective_capabilities:
+                            publisher.max_age_s = min(settings.promotion_max_age_s, session.promotion_max_age_s)
+                            publisher.recover(analyzer.store)
+                            publisher.flush(session.publish_evidence)
+                    except Exception as error:  # noqa: BLE001 — sanitize device/network failures and keep local capture alive
+                        from .protocol import ProtocolError
+                        if isinstance(error, ProtocolError):
+                            session.note_failure(error)
+                            print(f"Home Cortex V1: {error.code}/{error.detail_code}", file=sys.stderr)
+                        else:
+                            print("Home Cortex V1: INTERNAL_ERROR/local_failure", file=sys.stderr)
+                finally:
+                    observation.clear()
+                runtime.wait(0.3)
                 continue
             current = _advertised(runtime)
             if current != advertised:
                 try:
                     session.update_capabilities(current)
                     advertised = current
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 — legacy rollback keeps local capture alive
                     print(f"Home Cortex capability update failed: {error}", file=sys.stderr)
             now = time.monotonic()
             if now >= next_heartbeat:
                 try:
                     session.heartbeat()
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 — legacy rollback keeps local capture alive
                     print(f"Home Cortex heartbeat failed: {error}", file=sys.stderr)
                 next_heartbeat = time.monotonic() + 10
             if now >= next_poll:
@@ -147,15 +196,15 @@ def run(argv: list[str]) -> int:
                 try:
                     try:
                         fulfill_pending(session, runtime.packager)
-                    except Exception as error:
+                    except Exception as error:  # noqa: BLE001 — legacy rollback keeps local capture alive
                         print(f"Home Cortex observation poll failed: {error}", file=sys.stderr)
                 finally:
                     observation.clear()
-                if publisher is not None and advertised and "vision.autonomous_promotion" in advertised:
+                if publisher is not None and analyzer is not None and advertised and "vision.autonomous_promotion" in advertised:
                     try:
                         publisher.recover(analyzer.store)
                         publisher.flush(session.publish_evidence)
-                    except Exception as error:
+                    except Exception as error:  # noqa: BLE001 — legacy rollback keeps local capture alive
                         print(f"Home Cortex promotion flush failed: {error}", file=sys.stderr)
                 next_poll = time.monotonic() + 0.5
     except KeyboardInterrupt:
@@ -164,11 +213,25 @@ def run(argv: list[str]) -> int:
         if session is not None:
             try:
                 session.disconnect()
-            except Exception as error:
+            except Exception as error:  # noqa: BLE001 — local shutdown must finish after transport failure
                 print(f"Home Cortex disconnect failed: {error}", file=sys.stderr)
         if analyzer is not None:
             analyzer.stop()
         runtime.stop()
+    return 0
+
+
+def _enroll(argv: list[str]) -> int:
+    from .credentials import DEFAULT_STATE_DIR, enroll
+    parser = argparse.ArgumentParser(description="Enroll an existing embodiment over authenticated HTTPS")
+    parser.add_argument("--invitation-file", required=True, type=Path)
+    parser.add_argument("--ca-file", required=True, type=Path)
+    parser.add_argument("--credentials-dir", type=Path, default=DEFAULT_STATE_DIR / "credentials")
+    parser.add_argument("--embodiment-id", default="embodiment:macbook-0")
+    args = parser.parse_args(argv)
+    credentials = enroll(args.invitation_file, args.ca_file, args.credentials_dir, embodiment_id=args.embodiment_id)
+    print(f"V1 identity stored at {credentials.root}; endpoint={credentials.server_endpoint}")
+    print("Enrollment invitation may now be removed from local storage.")
     return 0
 
 

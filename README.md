@@ -7,8 +7,8 @@ import Home Cortex backend modules and it does not mutate the household graph.
 The current implementation is the preserved Mac development client: OpenCV
 captures the built-in camera and a standard-library HTTP server publishes an
 MJPEG preview. A synthetic source supports hardware-free development and tests.
-No neural detector, tracker, observation publisher, FFmpeg process, media
-gateway, Tapo integration, or MicroDuck adapter is implemented. A deterministic
+No tracker, FFmpeg process, media gateway, Tapo integration, or MicroDuck
+adapter is implemented. A deterministic
 frame-difference detector can retain local candidate clips.
 
 ## Install and run
@@ -19,23 +19,29 @@ home-cortex-client --source synthetic --host 127.0.0.1 --port 8088
 home-cortex-client --source mac --host 127.0.0.1 --port 8088
 ```
 
-To open a Home Cortex runtime session for the preconfigured MacBook body, set
-`HOME_CORTEX_CLIENT_CORTEX_URL` and `HOME_CORTEX_CLIENT_CORTEX_API_KEY` in the
-device environment before starting the client. The default embodiment ID is
-`embodiment:macbook-0`; override it with `HOME_CORTEX_CLIENT_EMBODIMENT_ID` or
-`--embodiment-id`. The client sends only that ID and current
-`vision.observe` availability. Home Cortex must already contain the body and
-its agent assignment; an unknown ID fails registration and stops the client.
-While running, the client heartbeats every 10 seconds and sends an explicit
-disconnect on clean shutdown. An abrupt process or network loss has no
-server-side session expiry yet, so Home Cortex may report the old session
-online until a server restart or a later successful disconnect.
+The Home Cortex-facing default is Client Interface V1 over TLS 1.3 with mutual
+certificate authentication. Enroll the existing body before starting a connected
+client; see [V1 provisioning](#v1-provisioning). The default embodiment ID remains
+`embodiment:macbook-0`, independent of hostname, IP or session. Home Cortex must
+already contain that body and its agent assignment. Registration never creates
+or reassigns an embodiment. Without credentials or a configured backend, local
+capture and preview remain available.
+
+The server returns heartbeat and lease durations. An independent maintenance
+thread renews the lease while capture/upload is busy. A conservative monotonic
+watchdog clears effective capabilities on expiry; stale/replaced sessions
+re-register with a new fence. Authentication/protocol failure remains visible
+and stops reconnect attempts until configuration is corrected. Clean shutdown
+disconnects explicitly. Home Cortex also fences idle sessions after lease expiry.
 
 Capture stays local. The client keeps a rolling buffer of short JPEG segments,
 60 seconds by default (`HOME_CORTEX_CLIENT_BUFFER_SECONDS`). Nothing in that
 buffer is uploaded until Home Cortex asks. A permission denial, a busy camera,
 or an encoding failure leaves the process running and the session connected.
-`vision.observe` is advertised only while a fresh frame is available.
+Configured implemented capabilities remain in the V1 manifest during temporary
+failure, with `TEMPORARILY_UNAVAILABLE` and a standard error reason. Revision
+increments only when the manifest changes. The default configured profile is
+`vision.observe`; enable clip/promotion explicitly after provisioning their grants.
 
 The same capture loop scores a few grayscale samples per second
 (`HOME_CORTEX_CLIENT_DETECTOR_HZ`, default 4). The score is the mean absolute
@@ -139,6 +145,8 @@ and reconciliation semantics must not change.
 
 ```sh
 python -m pytest -q
+ruff check .
+pyright
 ```
 
 Tests use the synthetic source and synthetic grayscale sequences. They cover
@@ -161,11 +169,8 @@ local.
 cd /Users/jiankuang/Workspace/home-cortex-client
 export HOME_CORTEX_CLIENT_EVIDENCE_DIR="$HOME/Library/Caches/home-cortex-client/evidence"
 
-export HOME_CORTEX_CLIENT_CORTEX_URL="http://home-cortex-0"
-export HOME_CORTEX_CLIENT_CORTEX_API_KEY="$(
-  ssh -o BatchMode=yes jkuang@home-cortex-0 \
-    'docker exec cortex-cortex-api-1 printenv CORTEX_API_KEY'
-)"
+export HOME_CORTEX_CLIENT_INTERFACE=v1
+# Enroll first. The HTTPS endpoint is read from the protected identity file.
 
 .venv/bin/home-cortex-client \
   --source mac \
@@ -174,8 +179,10 @@ export HOME_CORTEX_CLIENT_CORTEX_API_KEY="$(
   --port 8088
 ```
 
-The startup line must say `Home Cortex session=online`. Keep this Terminal
-running. In a second Terminal, use:
+Session registration starts asynchronously; the startup line can say
+`disconnected` while connecting. Verify MacBook is Online in Home Cortex and
+check stderr for standard V1 failure codes. Keep this Terminal running.
+In a second Terminal, use:
 
 ```sh
 cd /Users/jiankuang/Workspace/home-cortex-client
@@ -199,7 +206,7 @@ This test needs a person in front of the camera; synthetic tests cannot prove
 its real-world false-positive or false-negative rate.
 
 Port 8088 is Mac-local preview and inspection. The client connects outbound to
-Home Cortex on port 80, polls for explicit Stage 1 observation commands, and
+Home Cortex on HTTPS port 8443, polls for explicit Stage 1 observation commands, and
 does not send autonomous candidates. A manual `vision.observe` or
 `vision.observe_clip` creates separate on-demand evidence; it does not change
 candidate transfer state.
@@ -298,9 +305,9 @@ accelerator, or a vendor observation. Another embodiment can supply its own
 Local capability names are `vision.observe`, `vision.observe_clip`,
 `vision.semantic_filter`, and `vision.autonomous_promotion`. Each is a boolean
 the client declares from what it can currently do. The embodiment id does not
-imply them. The session sent to Home Cortex is the intersection of that local
-map and `HOME_CORTEX_CLIENT_CAPABILITIES`. The default is `vision.observe`,
-and only while a fresh frame is available. Add `vision.observe_clip` or
+imply them. The V1 manifest includes implemented names in
+`HOME_CORTEX_CLIENT_CAPABILITIES`, with their current availability. The default
+is `vision.observe`. Add `vision.observe_clip` or
 `vision.autonomous_promotion` only when the embodiment record already lists
 that name. `GET /debug/capabilities` shows both the local map and that session
 list.
@@ -344,6 +351,84 @@ hash travel with the upload. `client_runtime_version`, `perception_model_id`,
 and `perception_model_version` are optional diagnostics. Home Cortex can store
 them. The client does not expect the server to branch on them.
 
-The MacBook process is the first caller of this publisher. Another embodiment
-builds the same envelope with `conformance_fixtures` and posts it to
-`POST /v1/embodiments/{id}/session/evidence`.
+V1 wraps the unchanged promotion payload in `hc.event` with event identity,
+sequence and the current session fence, then posts to
+`POST /client-interface/v1/messages`. Retry reuses the identical event. A new
+session gets a new event while retaining the evidence ID and idempotency key.
+The legacy `/v1/embodiments/{id}/session/evidence` route is used only in explicit
+rollback mode.
+
+## V1 provisioning
+
+The deployed device origin is `https://home-cortex-0:8443`; enrollment uses
+`https://home-cortex-0:8444/client-interface/v1/enroll`. The CA certificate must
+arrive through a trusted operator channel. Hostname and CA validation are always
+enabled. Redirects and plaintext V1 origins are rejected.
+
+On the backend, `scripts/maintenance/client_interface.py prepare` creates TLS
+material and the opt-in Docker overlay; `bootstrap` creates the first provisioner
+for the existing body, with cortex-api stopped; `invite` uses the provisioner's
+mTLS identity to create a one-use V1 invitation. See the backend
+[deployment runbook](../home-cortex/docs/client-interface-deployment.md).
+The invitation is a protected JSON file containing `invitation_id`, `token`,
+`bootstrap_endpoint` and `embodiment_id`. Never paste its contents into logs.
+
+```sh
+home-cortex-client enroll \
+  --invitation-file "$HOME/Library/Application Support/Home Cortex Client/bootstrap/invitation.json" \
+  --ca-file "$HOME/Library/Application Support/Home Cortex Client/bootstrap/ca.crt" \
+  --embodiment-id embodiment:macbook-0
+home-cortex-client --source mac
+```
+
+The client generates its private key and PKCS#10 CSR locally with OpenSSL. A lost
+enrollment reply retries with the same key/CSR. Successful enrollment writes:
+
+```text
+~/Library/Application Support/Home Cortex Client/credentials/
+  identity.json       client_id, body, HTTPS origin, expiry and grants
+  client.key          local private key
+  client.csr          enrollment proof; reused on retry
+  client.crt          issued client certificate
+  ca.crt             original trusted CA
+  protocol/
+    receipts.sqlite3 durable command results and event identities
+    process.lock     one client process per state directory
+```
+
+Directories require mode 0700; files require owner-only permissions (0600).
+Symlink credential files are rejected. Override with `--credentials-dir` /
+`HOME_CORTEX_CLIENT_CREDENTIALS_DIR` and `--state-dir` /
+`HOME_CORTEX_CLIENT_STATE_DIR`. Receipts are bound to the client/body identity
+and retained through the protocol's 24-hour retry window. Remove consumed
+invitation files after enrollment. Certificates expire after 30 days. The backend
+does not yet expose identity-preserving certificate rotation. A new invitation
+and protected credential directory support operator re-provisioning/recovery,
+followed by revocation of the old certificate; this creates a new principal and
+must not be described as V1 certificate rotation.
+
+The existing MacBook body now has the three implemented vision profiles
+configured, and its replacement device credential grants still, clip and promotion
+access. Enable the intended local profiles explicitly:
+
+```sh
+HOME_CORTEX_CLIENT_CAPABILITIES=vision.observe,vision.observe_clip \
+  home-cortex-client --source mac
+# Optional Stage 3, with the existing local analyzer and policy:
+HOME_CORTEX_CLIENT_CAPABILITIES=vision.observe,vision.observe_clip,vision.autonomous_promotion \
+HOME_CORTEX_CLIENT_ANALYZER=vision home-cortex-client --source mac
+```
+
+V1 stills are captured after request dispatch. Clips use actual contiguous JPEG
+sample timestamps and the requested interval (the frozen protocol permits 1 ms
+rounding). If no such interval exists, the client returns
+`TEMPORARILY_UNAVAILABLE`; it never rewrites timestamps or silently shortens the
+clip. Evidence ID, SHA-256, manifest and HCCLIP1 encoding remain unchanged.
+Durable results suppress capture on redelivery and restart; an interrupted
+receipt with an uncertain outcome fails safely without a second capture.
+
+Rollback is explicit: set `HOME_CORTEX_CLIENT_INTERFACE=legacy`, the legacy HTTP
+URL and household bearer key in the process environment. Never call this V1
+conformance. `backend.py` and `commands.py` are isolated rollback adapters;
+remove them and the flag after physical V1 acceptance. Local perception has
+one shared implementation in both modes.

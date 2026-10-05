@@ -2,14 +2,14 @@
 import json
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from urllib.request import Request, urlopen
 
 import pytest
 
 from home_cortex_client.__main__ import build_parser
-from home_cortex_client.config import ClientConfig
 from home_cortex_client.capture import CaptureError
+from home_cortex_client.config import ClientConfig
 from home_cortex_client.frames import CameraFrame, capture_timestamp
 from home_cortex_client.runtime import EdgeRuntime
 from home_cortex_client.sources import MacCameraSource, SyntheticCameraSource
@@ -230,7 +230,7 @@ def test_encoding_failure_retries_without_reopening(monkeypatch) -> None:
 
 
 def test_debug_api_shows_a_moving_bounded_buffer(tmp_path) -> None:
-    start = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+    start = datetime(2026, 10, 3, 12, 0, tzinfo=UTC)
     holder: dict = {}
 
     def clock() -> datetime:

@@ -1,0 +1,27 @@
+{
+  "description": "HCCLIP1 two-frame clip. Frame times are the capture interval in epoch milliseconds.",
+  "magic": "HCCLIP1",
+  "frame_count": 2,
+  "frames": [
+    {"sequence": 7, "epoch_ms": 1791172801000, "jpeg_base64": "/9j/2Q=="},
+    {"sequence": 8, "epoch_ms": 1791172801100, "jpeg_base64": "/9j/2Q=="}
+  ],
+  "container_sha256": "2ad2c97605b879c926f0b745328e5118c0be3701b3b817e1d78317cdb00fd7c8",
+  "container_base64": "SENDTElQMQAAAAIAAAAAAAAABwAAAaEKN/HoAAAABP/Y/9kAAAAAAAAACAAAAaEKN/JMAAAABP/Y/9k=",
+  "manifest": {
+    "embodiment_id": "embodiment:example-01",
+    "camera_id": "camera:example",
+    "media_type": "video_clip",
+    "captured_start": "2026-10-05T04:00:01.000Z",
+    "captured_end": "2026-10-05T04:00:01.100Z",
+    "duration_ms": 100,
+    "sequence_start": 7,
+    "sequence_end": 8,
+    "width": 1,
+    "height": 1,
+    "content_type": "application/x-home-cortex-clip",
+    "sha256": "2ad2c97605b879c926f0b745328e5118c0be3701b3b817e1d78317cdb00fd7c8",
+    "reason": "manual_observe_clip",
+    "evidence_id": "evidence:2aaa056656b48658ae99c7f8381f979a"
+  }
+}

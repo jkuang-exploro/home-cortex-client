@@ -1,0 +1,26 @@
+{
+  "protocol_version": "1.0",
+  "schema_name": "hc.response",
+  "schema_version": 1,
+  "message_id": "00000000-0000-4000-8000-000000000002",
+  "sent_at": "2026-10-05T04:00:00.000Z",
+  "request_id": "00000000-0000-4000-8000-000000000001",
+  "target": {"embodiment_id": "embodiment:example-01", "session_id": null},
+  "operation": "session.register",
+  "completed_at": "2026-10-05T04:00:00.000Z",
+  "status": "SUCCEEDED",
+  "result": {
+    "client_id": "client:example-01",
+    "embodiment_id": "embodiment:example-01",
+    "session_id": "runtime-session:example:1",
+    "state": "ACTIVE",
+    "connected_at": "2026-10-05T04:00:00.000Z",
+    "last_seen_at": "2026-10-05T04:00:00.000Z",
+    "server_time": "2026-10-05T04:00:00.000Z",
+    "lease_expires_at": "2026-10-05T04:00:30.000Z",
+    "heartbeat_interval_ms": 10000,
+    "lease_duration_ms": 30000,
+    "manifest_revision": 1,
+    "effective_capabilities": ["vision.observe"]
+  }
+}

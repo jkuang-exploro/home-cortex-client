@@ -1,0 +1,23 @@
+{
+  "revision": 1,
+  "capabilities": [
+    {
+      "name": "vision.observe",
+      "schema_version": 1,
+      "availability": "AVAILABLE"
+    },
+    {
+      "name": "vision.observe_clip",
+      "schema_version": 1,
+      "availability": "TEMPORARILY_UNAVAILABLE",
+      "reason": {
+        "code": "TEMPORARILY_UNAVAILABLE",
+        "detail_code": "buffer_too_short",
+        "message": "Recent clip buffer is not ready.",
+        "retryable": true,
+        "retry_after_ms": null
+      },
+      "limits": {"max_clip_duration_ms": 10000}
+    }
+  ]
+}

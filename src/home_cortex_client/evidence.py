@@ -11,15 +11,16 @@ import hashlib
 import json
 import math
 import shutil
+import struct
+from bisect import bisect_left
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from threading import Lock
-from typing import Callable
-import struct
 
 from .buffer import BufferError, CapturedSegment, RingBuffer
-
 
 IDENTITY_FIELDS = (
     "embodiment_id",
@@ -282,6 +283,69 @@ class EvidencePackager:
         self.store.put(manifest, payload, now=current)
         return PackagedEvidence(manifest, payload)
 
+    def get_v1_still(self, sent_at: datetime) -> PackagedEvidence:
+        """Select a post-request frame using the existing capture loop, never a cached answer."""
+        latest = self.buffer.latest()
+        if (latest is None or latest.captured_at < sent_at) and self.refresh is not None:
+            self.refresh()
+        latest = self._require_fresh(self.clock())
+        if latest.captured_at < sent_at:
+            raise EvidenceFailure("camera_unavailable", "No post-request frame is available")
+        return self.get_latest_still(now=self.clock())
+
+    def get_v1_clip(self, duration_ms: int) -> PackagedEvidence:
+        """Exact recent interval over existing JPEG samples; no synthetic frame timestamps."""
+        if type(duration_ms) is not int or not 1 <= duration_ms <= 60000:
+            raise EvidenceFailure("invalid_duration", "Invalid clip duration")
+        self._require_fresh(self.clock())
+        retained = self.buffer.segments()
+        if len(retained) < 2:
+            raise EvidenceFailure("buffer_too_short", "Insufficient contiguous samples")
+        # V1 capture end is the last frame's actual timestamp, not its nominal segment end.
+        chosen = None
+        exact = False
+        times = [frame.captured_at for frame in retained]
+        from datetime import timedelta
+        for last in range(len(retained) - 1, 0, -1):
+            end = times[last]
+            if (self.clock() - end).total_seconds() > 5:
+                break
+            first = bisect_left(times, end - timedelta(milliseconds=duration_ms), 0, last)
+            for index in (first, first - 1):
+                if 0 <= index < last:
+                    delta = abs(_duration_ms(times[index], end) - duration_ms)
+                    if delta == 0:
+                        chosen = retained[index:last + 1]
+                        exact = True
+                        break
+                    if delta == 1 and chosen is None:
+                        chosen = retained[index:last + 1]
+            if exact:
+                break
+        if chosen is None:
+            raise EvidenceFailure("buffer_too_short", "No exact recent sample interval is available")
+        end = chosen[-1].captured_at
+        sequences = [frame.sequence_number for frame in chosen]
+        if sequences != list(range(sequences[0], sequences[-1] + 1)):
+            raise EvidenceFailure("buffer_too_short", "Clip samples are not contiguous")
+        if len({(frame.width, frame.height) for frame in chosen}) != 1:
+            raise EvidenceFailure("capture_failure", "Clip samples have different resolutions")
+        # Gaps in the camera clock are not a contiguous recording merely because IDs increment.
+        if any((right.captured_at - left.captured_at).total_seconds() > max(left.duration_s * 2, 0.1)
+               for left, right in pairwise(chosen)):
+            raise EvidenceFailure("buffer_too_short", "Clip capture was interrupted")
+        payload = encode_clip(chosen)
+        manifest = build_manifest(
+            embodiment_id=self.embodiment_id, camera_id=chosen[0].camera_id,
+            media_type="video_clip", captured_start=_iso(chosen[0].captured_at),
+            captured_end=_iso(end), duration_ms=_duration_ms(chosen[0].captured_at, end),
+            sequence_start=sequences[0], sequence_end=sequences[-1],
+            width=chosen[0].width, height=chosen[0].height, content_type=CLIP_CONTENT_TYPE,
+            sha256=hashlib.sha256(payload).hexdigest(), reason=MANUAL_OBSERVE_CLIP,
+        )
+        self.store.put(manifest, payload, now=self.clock())
+        return PackagedEvidence(manifest, payload)
+
     def _fresh_latest(self, now: datetime | None) -> CapturedSegment:
         current = self._resolve_now(now)
         try:
@@ -322,18 +386,18 @@ def _iso(value: datetime) -> str:
 
 
 def _unix_millis(value: datetime) -> int:
-    return int(round(value.timestamp() * 1000))
+    return round(value.timestamp() * 1000)
 
 
 def _duration_ms(start: datetime, end: datetime) -> int:
-    return int(round((end - start).total_seconds() * 1000))
+    return round((end - start).total_seconds() * 1000)
 
 
 def _stored_at(directory: Path) -> datetime:
     try:
         stamp = datetime.fromisoformat((directory / "stored_at").read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
-        stamp = datetime.fromtimestamp(directory.stat().st_mtime, timezone.utc)
+        stamp = datetime.fromtimestamp(directory.stat().st_mtime, UTC)
     if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
+        stamp = stamp.replace(tzinfo=UTC)
     return stamp
