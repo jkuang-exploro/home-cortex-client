@@ -4,4 +4,5 @@
 __pycache__/
 *.egg-info/
 dist/
+evaluation/macbook-0-semantic-v1/*.jpg
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 
 from .buffer import BufferError
+from .candidates import CandidateFailure
 from .evidence import EvidenceFailure
 
 
@@ -21,6 +23,9 @@ def dispatch(
         return _json(status, {"error": {"code": error.code, "message": str(error)}})
     except BufferError as error:
         status = 422 if error.code == "invalid_duration" else 409
+        return _json(status, {"error": {"code": error.code, "message": str(error)}})
+    except CandidateFailure as error:
+        status = 404 if error.code == "not_found" else 409
         return _json(status, {"error": {"code": error.code, "message": str(error)}})
 
 
@@ -42,6 +47,53 @@ def _dispatch(
         seconds = _seconds(query.get("seconds"))
         packaged = runtime.packager.get_recent_clip(seconds)
         return _json(200, _evidence_body(runtime, packaged.manifest))
+    if path == "/debug/detector/status" and method == "GET":
+        return _json(200, runtime.detector_status())
+    if path == "/debug/candidates" and method == "GET":
+        return _json(200, runtime.candidate_index())
+    if path == "/debug/events" and method == "GET":
+        records = runtime.candidates.store.records()
+        return _json(200, {"events": [_event_row(record) for record in records]})
+    if path == "/debug/events/stats" and method == "GET":
+        return _json(200, runtime.event_stats())
+    event_prefix = "/debug/events/"
+    if path.startswith(event_prefix) and method == "GET":
+        remainder = path[len(event_prefix):]
+        if remainder.endswith("/clip"):
+            candidate_id = remainder[:-len("/clip")]
+            inspected = runtime.candidates.store.inspect(candidate_id)
+            if not inspected["evidence_available"]:
+                raise CandidateFailure("expired", "candidate clip is no longer available")
+            if not inspected["hash_ok"]:
+                raise CandidateFailure("invalid_manifest", "candidate clip hash does not match")
+            payload = runtime.candidates.store.media(candidate_id)
+            return (200, "application/x-home-cortex-clip", {
+                "X-Content-Sha256": str(inspected["manifest"]["sha256"]),
+                "Cache-Control": "no-store",
+            }, payload)
+        return _json(200, runtime.candidates.store.inspect(remainder))
+    candidate_prefix = "/debug/candidates/"
+    if path.startswith(candidate_prefix) and method == "GET":
+        candidate_id = path[len(candidate_prefix):]
+        if not candidate_id:
+            return _json(404, {"error": {"code": "not_found", "message": "unknown debug route"}})
+        return _json(200, runtime.candidates.store.inspect(candidate_id))
+    if path == "/debug/capabilities" and method == "GET":
+        return _json(200, {
+            "local_capabilities": runtime.local_capabilities(),
+            "session_advertisement": runtime.session_advertisement(),
+        })
+    if path == "/debug/semantics" and method == "GET":
+        return _json(200, runtime.semantic_index())
+    semantics_prefix = "/debug/semantics/"
+    if path.startswith(semantics_prefix) and method == "GET":
+        candidate_id = path[len(semantics_prefix):]
+        if not candidate_id:
+            return _json(404, {"error": {"code": "not_found", "message": "unknown debug route"}})
+        found = runtime.semantic_result(candidate_id)
+        if found is None:
+            return _json(404, {"error": {"code": "not_found", "message": "semantic result was not found"}})
+        return _json(200, found)
     prefix = "/debug/evidence/"
     if path.startswith(prefix) and method == "GET":
         evidence_id = path[len(prefix):]
@@ -49,6 +101,22 @@ def _dispatch(
             return _json(404, {"error": {"code": "not_found", "message": "unknown debug route"}})
         return _json(200, runtime.packager.store.inspect(evidence_id))
     return _json(404, {"error": {"code": "not_found", "message": "unknown debug route"}})
+
+
+def _event_row(record: dict[str, object]) -> dict[str, object]:
+    started = datetime.fromisoformat(str(record["trigger_started_at"]))
+    ended = datetime.fromisoformat(str(record["trigger_ended_at"]))
+    return {
+        "candidate_id": record["candidate_id"],
+        "trigger_type": record["trigger_type"],
+        "start": record["trigger_started_at"],
+        "end": record["trigger_ended_at"],
+        "duration_s": round(max(0.0, (ended - started).total_seconds()), 3),
+        "peak_score": record["peak_score"],
+        "evidence_id": record["evidence_id"],
+        "status": "LOCAL" if record["status"] == "local" else "EXPIRED",
+        "transfer_state": record["upload_state"],
+    }
 
 
 def _latest_frame(runtime: Any) -> tuple[int, str, dict[str, str], bytes]:

@@ -1,0 +1,45 @@
+{
+  "corpus_id": "macbook-0-semantic",
+  "version": 1,
+  "embodiment_id": "embodiment:macbook-0",
+  "camera_id": "camera:built_in",
+  "captured_on": "2026-10-04",
+  "hardware": "Apple M4, 10 cores, 16 GiB, macOS 26.6.2 (25G83), arm64",
+  "fingerprint": "626f85c1bd01672d6a419689f31569859f16a87e354a6d8d21d32c3e54021f55",
+  "fingerprint_covers": "version and each file name, sha256, and byte length",
+  "files": [
+    {
+      "name": "frame-00-black.jpg",
+      "sha256": "7508b10ed7a233766eee931b8755627bde5e6e6d0750120ee2d218695ece5dca",
+      "bytes": 33269,
+      "ground_truth": {
+        "person_visible": false,
+        "animal_visible": false,
+        "scored_categories": [],
+        "note": "Frame is black. No person, animal, or scorable object is visible."
+      }
+    },
+    {
+      "name": "frame-24-dim-room.jpg",
+      "sha256": "631645fb398e133358a40176da8de47f5742302b228b4181f8d939710214ac23",
+      "bytes": 193677,
+      "ground_truth": {
+        "person_visible": false,
+        "animal_visible": false,
+        "scored_categories": [],
+        "note": "Very dark room. A sofa-like shape and a pale edge are barely visible. Furniture is not scored because the exposure is too low to confirm it."
+      }
+    }
+  ],
+  "absent_scenarios": [
+    "user sitting still",
+    "user entering frame",
+    "user leaving frame",
+    "hand movement",
+    "person holding object",
+    "ordinary background motion",
+    "lighting change",
+    "camera cover/uncover as its own labeled event",
+    "noisy false Stage 2 event"
+  ]
+}

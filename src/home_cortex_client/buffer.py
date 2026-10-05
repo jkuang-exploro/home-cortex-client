@@ -164,6 +164,19 @@ class RingBuffer:
             raise BufferError("buffer_too_short", "buffer does not cover the requested interval")
         return tuple(chosen)
 
+    def overlapping(self, start: datetime, end: datetime) -> tuple[CapturedSegment, ...]:
+        """Return segments that overlap ``[start, end]``, using actual capture times."""
+        if start.tzinfo is None or end.tzinfo is None:
+            raise BufferError("invalid_duration", "selection time must be timezone-aware")
+        if end < start:
+            raise BufferError("invalid_duration", "selection end is before the start")
+        with self._lock:
+            retained = list(self._segments)
+        return tuple(
+            segment for segment in retained
+            if segment.captured_at <= end and segment.ends_at() > start
+        )
+
     def _evict(self) -> None:
         while self._segments:
             newest = self._segments[-1].captured_at

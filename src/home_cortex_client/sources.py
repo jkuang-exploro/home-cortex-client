@@ -5,6 +5,7 @@ import platform
 from datetime import datetime, timedelta, timezone
 
 from .capture import CaptureError, classify_camera_failure
+from .config import ChangeDetectionConfig
 from .frames import CameraFrame, capture_timestamp
 
 
@@ -137,11 +138,24 @@ class MacCameraSource:
             raise CaptureError("encoding_failed") from error
         if not ok:
             raise CaptureError("encoding_failed")
+        jpeg = encoded.tobytes()
+        sampled = _luma_sample(self._cv2, image)
+        if sampled is None:
+            return CameraFrame(
+                captured_at=captured_at,
+                width=int(width),
+                height=int(height),
+                jpeg=jpeg,
+            )
+        raw, sample_width, sample_height = sampled
         return CameraFrame(
             captured_at=captured_at,
             width=int(width),
             height=int(height),
-            jpeg=encoded.tobytes(),
+            jpeg=jpeg,
+            sample=raw,
+            sample_width=sample_width,
+            sample_height=sample_height,
         )
 
     def close(self) -> None:
@@ -158,4 +172,24 @@ def _load_cv2():
     except ImportError as error:
         raise RuntimeError("opencv-python is not installed") from error
     return cv2
+
+
+def _luma_sample(cv2, image) -> tuple[bytes, int, int] | None:
+    """Downsample to the detector grid. A failure leaves the JPEG frame usable."""
+    width = ChangeDetectionConfig.grid_width
+    height = ChangeDetectionConfig.grid_height
+    try:
+        if len(image.shape) == 2:
+            gray = image
+        elif image.shape[2] == 4:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+        else:
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        small = cv2.resize(gray, (width, height), interpolation=cv2.INTER_AREA)
+        raw = small.tobytes()
+    except Exception:
+        return None
+    if len(raw) != width * height:
+        return None
+    return raw, width, height
 

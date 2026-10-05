@@ -41,6 +41,7 @@ CLIP_CONTENT_TYPE = "application/x-home-cortex-clip"
 CLIP_MAGIC = b"HCCLIP1"
 MANUAL_OBSERVE = "manual_observe"
 MANUAL_OBSERVE_CLIP = "manual_observe_clip"
+VISUAL_CHANGE = "visual_change"
 
 
 class EvidenceFailure(Exception):

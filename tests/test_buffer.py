@@ -21,6 +21,19 @@ def _append(buffer: RingBuffer, offset_s: float, *, payload: bytes = TINY_JPEG, 
     )
 
 
+def test_overlapping_uses_segment_bounds() -> None:
+    buffer = RingBuffer(duration_s=60)
+    _append(buffer, 0, duration=1)
+    _append(buffer, 1, duration=1)
+    point = buffer.overlapping(START + timedelta(seconds=0.5), START + timedelta(seconds=0.5))
+    assert [segment.sequence_number for segment in point] == [1]
+    both = buffer.overlapping(START, START + timedelta(seconds=1))
+    assert [segment.sequence_number for segment in both] == [1, 2]
+    with pytest.raises(BufferError) as error:
+        buffer.overlapping(START + timedelta(seconds=2), START)
+    assert error.value.code == "invalid_duration"
+
+
 def test_sequence_and_timestamps_increase_and_latest_is_newest() -> None:
     buffer = RingBuffer(duration_s=60)
     first = _append(buffer, 0)
